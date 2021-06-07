@@ -1,0 +1,137 @@
+---
+title: "NYPD Shooting Incident Data Report"
+date: "5/22/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(lubridate)
+library(dplyr)
+library(ggrepel)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Importing the Data
+
+The first step of the process is importing the data. In order to make it reproducible, it is being kept in it's CSV format. Our variable name will be NYC, since it is both relevant and short.
+
+```{r}
+NYC <- read.csv(url("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv"))
+SHOT <-read.csv('https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD')
+head(NYC)
+```
+
+## Description of the Data
+
+In order for us to be able to clean the data we first need a summary and description of it. We can first do this by using the summary command.
+
+```{r}
+summary(NYC)
+```
+
+We can see from the summary that the columns are a mix of characters and numbers comprised of 23568 rows and 19 different columns. Each row describes a shooting with information that includes location, date, time, sex and race.
+
+## Tidying and Transforming Data
+
+The first thing we will do to clean and tidy the data is remove any columns we don't need. This includes the "latitude", "longitude", "JURISDICTION_CODE",X_COORD_CD" and "Y_COORD_CD" columns as well as the "lon_lat" columns. We don't need these columns to further analyze the data.
+
+```{r}
+NYC <- NYC[, !(names(NYC) %in% c("Latitude","Longitude", "X_COORD_CD", "Y_COORD_CD", "Lon_Lat", "JURISDICTION_CODE"))]
+head(NYC)
+```
+You can now see that those 7 columns are no longer included. 
+It appears there are a lot of missing values within the "location_desc" and "perp_age_group" columns, so we will need to apply a function that removes all the NA's from the data.
+
+```{r}
+sapply(NYC, function(x) sum(is.na(x)))
+
+```
+
+Last we will transform the date and time to their correct format
+
+```{r}
+date <- NYC
+date$OCCUR_DATE <- as.Date(date$OCCUR_DATE,format = "%m/%d/%Y")
+date$DAY<- wday(date$OCCUR_DATE, label=TRUE)
+
+h <- function(x) {
+  return (as.numeric(strsplit(x,":")[[1]][1]))
+}
+time_hour <- NYC %>%
+  mutate(HOUR = sapply(OCCUR_TIME, h))
+hr <- c(paste(c(12,1:11),"AM"), paste(c(12,1:11),"PM"))
+time_hour$HOUR <- factor(time_hour$HOUR, level = 0:23, label = hr)
+
+```
+
+In addition to the NYC data set I will also clean and tidy another data frame named "SHOT". Here I will try a different approach to cleaning, where I will first make everything lower case and then make the boroughs a factor. Lastly I will put the date in the correct date time format.
+
+```{r}
+names(SHOT) <- tolower(names(SHOT))
+factor_cols = c('boro')
+SHOT[factor_cols] <- lapply(SHOT[factor_cols], as.factor)
+SHOT <- SHOT %>%
+mutate(occur_date = mdy(occur_date))
+summary(SHOT)
+```
+
+
+## Visualizations and Analysis
+
+I want to visualize two different things from the data.
+
+1. Is there a borough where shootings happen more frequently?
+
+2. Is there a certain time of day where shootings happen more frequently?
+
+```{r}
+ggplot(NYC, aes(x=factor(BORO)))+
+  geom_bar(stat="count", width=0.7, fill="steelblue")+
+  theme_minimal()
+```
+
+Based off the bar plot we can see that Brooklyn has far more shootings than any other Borough. This raises the question of the frequency of shootings per person that lives there. Based off population data although Brooklyn has the most people residing in it, it still has a higher frequency of shootings other than the Bronx.
+
+```{r}
+ggplot(time_hour, aes(x=factor(HOUR)))+
+  geom_bar(stat="count", width=.7, fill="steelblue")+
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+Unsurprisingly the most shootings happen late at night. Specifically at 10pm-1am and it reaches its peak at 11pm. I would be curious to see the day of week the most shootings happened paired with the hour as well.
+
+
+
+## Modeling
+
+To be able to model the categorical variable sex and precinct we will first have to create  a factor variable. After this we can create a linear model to see the relationship between the gender that committed the shooting incident and the precinct it happened in.
+```{r}
+# creating the factor variable
+NYC$sex.f <- factor(NYC$VIC_SEX)
+is.factor(NYC$sex.f)
+summary(lm(PRECINCT ~ sex.f, data = NYC))
+```
+
+```{r}
+boro_tot <- SHOT %>%
+group_by(boro, year(occur_date)) %>%
+summarize(shootings = n_distinct(incident_key),) %>%
+ungroup()
+```
+
+```{r}
+mod <- lm(shootings ~ `year(occur_date)` + boro, data=boro_tot)
+summary(mod)
+
+```
+
+Here it can be seen that there is a strong relationship between shootings and the year plus the borough.
+
+## Conclusions and Possible Bias
+
+Fortunately both my questions could be answered by visualizing and plotting the data.
+1. Brooklyn has the most shootings by far, but I also wondered about frequency of shootings. A quick google search showed the Brooklyn population was almost twice the size of the Bronx. Even after accounting for the size of populations the Bronx was a close second in frequency.
+2. Based off plotting the shooting count vs. time of day, it could easily been seen that nighttime had the vast majority of shootings. The number of cases plateaued from around 7am-9am and then began to rise again until it peaked at 11pm.
+
+A possible bias that could be present in the data is how heavily an area is policed. If there is a stronger police presence in an area, that could result in a higher amount of incidents reported. My own personal fear of being out alone at night resulted in the analysis of the time of the shootings, which is a potential bias.
